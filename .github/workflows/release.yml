@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: sonar-x86_64-windows.zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: sonar-x86_64-linux.tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: sonar-aarch64-macos.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig-dev libwayland-dev libxkbcommon-x11-dev \
+            libx11-xcb-dev libssl-dev libzstd-dev libasound2-dev
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "sonar-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $dir | Out-Null
+          Copy-Item target/release/sonar.exe "$dir/"
+          Copy-Item README.md LICENSE "$dir/"
+          Compress-Archive -Path $dir -DestinationPath "${{ matrix.archive }}"
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          dir="sonar-${{ matrix.target }}"
+          mkdir -p "$dir"
+          cp target/release/sonar "$dir/"
+          cp README.md LICENSE "$dir/"
+          tar -czf "${{ matrix.archive }}" "$dir"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.archive }}
