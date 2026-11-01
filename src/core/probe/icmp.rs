@@ -195,9 +195,10 @@ mod unix {
         socket.send_to(&packet, &socket2::SockAddr::from(dst))?;
 
         let started = Instant::now();
-        let mut buf = [0u8; 1500];
+        let mut buf: [std::mem::MaybeUninit<u8>; 1500] =
+            std::array::from_fn(|_| std::mem::MaybeUninit::uninit());
         while started.elapsed() < timeout {
-            // 收包deadline 对齐超时
+            // 收包 deadline 对齐超时
             let remain = timeout.saturating_sub(started.elapsed());
             if remain.is_zero() {
                 break;
@@ -217,7 +218,9 @@ mod unix {
                 }
                 Err(e) => return Err(e),
             };
-            if parse_reply(&buf[..n], ident, seq).is_some() {
+            // 安全性：recv_from 已初始化写入的前 n 个字节
+            let data = unsafe { buf[..n].assume_init_ref() };
+            if parse_reply(data, ident, seq).is_some() {
                 return Ok(Some(started.elapsed()));
             }
             // 其他进程/历史报文，继续收

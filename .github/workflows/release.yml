@@ -54,8 +54,8 @@ jobs:
         run: |
           $dir = "sonar-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $dir | Out-Null
-          Copy-Item target/release/sonar.exe "$dir/"
-          Copy-Item README.md LICENSE "$dir/"
+          Copy-Item -Path "target/release/sonar.exe" -Destination "$dir/"
+          Copy-Item -Path "README.md", "LICENSE" -Destination "$dir/"
           Compress-Archive -Path $dir -DestinationPath "${{ matrix.archive }}"
 
       - name: Package (Unix)

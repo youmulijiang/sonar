@@ -18,7 +18,7 @@ futures = "0.3"
 
 # 网络与解析
 ipnet = "2"
-socket2 = "0.5"
+socket2 = { version = "0.5", features = ["all"] }
 
 # 事件通道 / CLI / 错误 / 文件对话框
 crossbeam-channel = "0.5"
