@@ -15,7 +15,8 @@ use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::table::{Column, TableDelegate, TableState};
 use gpui_kit::{
-    App, ClipboardItem, Context, Entity, IntoElement, ParentElement as _, SharedString,
+    App, ClipboardItem, Context, Div, Entity, InteractiveElement as _, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, SharedString, Stateful,
     Styled as _, Window, div, px,
 };
 
@@ -70,8 +71,10 @@ impl HostRow {
 
 pub struct ResultsDelegate {
     rows: Vec<HostRow>,
-    /// 勾选的行（按 IP 记录）
+    /// 勾选的行（按 IP 记录；拖动选择与勾选框共用此集合）
     checked: HashSet<Ipv4Addr>,
+    /// 拖动选择进行中：(锚点行, 最近一次经过的行)
+    drag: Option<(usize, i64)>,
 }
 
 impl ResultsDelegate {
@@ -79,12 +82,14 @@ impl ResultsDelegate {
         ResultsDelegate {
             rows: Vec::new(),
             checked: HashSet::new(),
+            drag: None,
         }
     }
 
     pub fn clear(&mut self) {
         self.rows.clear();
         self.checked.clear();
+        self.drag = None;
     }
 
     pub fn replace_rows(&mut self, rows: Vec<HostRow>) {
@@ -98,6 +103,25 @@ impl ResultsDelegate {
         if !self.checked.remove(&ip) {
             self.checked.insert(ip);
         }
+    }
+
+    /// 将 [a, b] 行区间内全部加入勾选（拖动涂选）
+    fn paint_range(&mut self, a: i64, b: i64) {
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        for r in &self.rows {
+            let ix = self.row_index_of(r.ip);
+            if ix >= lo && ix <= hi {
+                self.checked.insert(r.ip);
+            }
+        }
+    }
+
+    fn row_index_of(&self, ip: Ipv4Addr) -> i64 {
+        self.rows
+            .iter()
+            .position(|r| r.ip == ip)
+            .map(|i| i as i64)
+            .unwrap_or(-1)
     }
 
     fn checked_ips(&self) -> Vec<&HostRow> {
@@ -211,6 +235,64 @@ impl TableDelegate for ResultsDelegate {
                 .child(SharedString::from(row.detail.clone()))
                 .into_any_element(),
         }
+    }
+
+    /// 行渲染：选中行整行高亮；按住左键在行间拖动可连续勾选
+    fn render_tr(
+        &mut self,
+        row_ix: usize,
+        _window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> Stateful<Div> {
+        let is_checked = self
+            .rows
+            .get(row_ix)
+            .is_some_and(|r| self.checked.contains(&r.ip));
+        let secondary = cx.theme().secondary;
+        let mut row = div().id(("row", row_ix));
+        if is_checked {
+            row = row.bg(secondary);
+        }
+        row.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(
+                move |this: &mut TableState<Self>, _: &MouseDownEvent, _, cx| {
+                    let d = this.delegate_mut();
+                    if let Some(r) = d.rows.get(row_ix) {
+                        let ip = r.ip;
+                        d.checked.insert(ip);
+                        d.drag = Some((row_ix, row_ix as i64));
+                        cx.notify();
+                    }
+                },
+            ),
+        )
+        .on_mouse_move(cx.listener(
+            move |this: &mut TableState<Self>, ev: &MouseMoveEvent, _, cx| {
+                let d = this.delegate_mut();
+                let Some((anchor, last)) = d.drag else {
+                    return;
+                };
+                if ev.pressed_button != Some(MouseButton::Left) {
+                    d.drag = None;
+                    cx.notify();
+                    return;
+                }
+                let cur = row_ix as i64;
+                if cur != last {
+                    d.paint_range(anchor as i64, cur);
+                    d.drag = Some((anchor, cur));
+                    cx.notify();
+                }
+            },
+        ))
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this: &mut TableState<Self>, _: &MouseUpEvent, _, cx| {
+                this.delegate_mut().drag = None;
+                cx.notify();
+            }),
+        )
     }
 
     /// 行右键菜单：复制 IP / 内容
