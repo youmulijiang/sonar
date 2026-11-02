@@ -22,7 +22,7 @@ ICMP · 系统 Ping · TCP Ping · 端口扫描 —— 多探针、高并发、�
 | **ICMP** | 原生 ICMP Echo。Windows 走 iphlpapi 的 `IcmpSendEcho`（免管理员）；Unix 走 raw socket | Windows 普通用户 / Unix 需 root 或 `cap_net_raw` |
 | **系统 Ping** | 调用操作系统自带 `ping` 命令 | 无 |
 | **TCP Ping** | 对常用服务端口发起 TCP 连接，连接成功**或收到 RST** 均判定存活 | 无 |
-| **端口扫描** | RustScan 风格 (主机, 端口) 全并发扫描，默认仅扫已确认存活的主机（默认关闭，可一键开启） | 无 |
+| **端口扫描** | RustScan 风格 (主机, 端口) 全并发扫描，开启后扫描**全部目标**——禁 ping 等其他方式未确认的主机也能由开放端口 / RST 判定存活（默认关闭，可一键开启） | 无 |
 
 - 🎯 **多探针高并发**：探活方式三选一 + 可选端口扫描；`buffer_unordered` 全速流水推进，慢主机不阻塞整体
 - 🧾 **目标灵活**：多行文本框每行一个目标，支持 IP / IP 段 / CIDR / 域名（`192.168.1.0/24`、`10.0.0.1-100`、`db.example.com`），可从文本文件导入（支持 `#` 注释）
@@ -136,8 +136,9 @@ CI（GitHub Actions，windows-latest）覆盖：`cargo fmt --check` → `clippy 
 - **Windows**：ICMP 走 `IcmpSendEcho`，普通用户即可；目标禁 ping 时请用 TCP Ping
   或端口扫描方式兜底。
 - **Unix**：ICMP 需要 root 或 `setcap cap_net_raw`，否则提示改用 ping/tcp。
-- **VPN / 安全软件 / TUN 代理**可能吞掉 TCP RST（关闭端口也表现为超时），此时
-  TCP Ping 只能靠连接成功判活，建议同时启用 ICMP。
+- **VPN / 安全软件 / TUN 代理**可能干扰 TCP 探测：或吞掉 RST（关闭端口表现为超时），
+  或劫持全部出站连接（任何端口都"连接成功"，端口扫描将产生大量假阳性存活）。
+  端口扫描结果请结合 ICMP 判断，必要时在代理软件中将目标网段加入直连规则。
 - **Debug 构建**下，gpui 上游（gpui-pre 0.3.10）存在一个无障碍焦点断言
   （`set_focus called more than once in a single frame`），在特定交互下会 panic；
   该断言仅启用 `debug_assertions` 时生效，**release 构建不受影响**。

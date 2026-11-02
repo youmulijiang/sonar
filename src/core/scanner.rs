@@ -127,12 +127,9 @@ async fn run_inner(
 
     // ---------- 阶段二：端口扫描 ----------
     if cfg.methods.contains(&ProbeMethod::PortScan) && !cancel.is_cancelled() {
-        // 未启用其他探针时扫描全部目标；否则只扫已确认存活的主机
-        let scan_targets: Vec<Ipv4Addr> = if liveness.is_empty() {
-            hosts.clone()
-        } else {
-            results.values().filter(|r| r.alive).map(|r| r.ip).collect()
-        };
+        // 端口扫描开启时扫描全部目标：禁 ping 等在探活阶段未确认的主机，
+        // 也能通过开放端口 / RST 响应被判定存活（发现信号同 nmap -Pn 语义）
+        let scan_targets: Vec<Ipv4Addr> = hosts.clone();
 
         if scan_targets.is_empty() {
             send(ScanEvent::Log("没有需要端口扫描的主机".into()));
