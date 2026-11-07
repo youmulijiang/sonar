@@ -22,7 +22,14 @@ pub async fn probe(ip: Ipv4Addr, timeout: Duration) -> ProbeOutcome {
     let wait = timeout + Duration::from_millis(500);
     let result = tokio::time::timeout(wait, cmd.output()).await;
     match result {
-        Ok(Ok(out)) if out.status.success() => {
+        Ok(Ok(out))
+            if out.status.success()
+                && (!cfg!(windows)
+                    || out
+                        .stdout
+                        .windows(4)
+                        .any(|w| w.eq_ignore_ascii_case(b"ttl="))) =>
+        {
             ProbeOutcome::alive(Some(started.elapsed()), "系统 ping 应答")
         }
         Ok(Ok(_)) => ProbeOutcome::dead("不可达"),
@@ -49,4 +56,19 @@ fn build_command(ip: Ipv4Addr, timeout: Duration) -> Command {
     }
     cmd.arg(ip.to_string());
     cmd
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn repeated_loopback_ping() {
+        for _ in 0..10 {
+            assert!(
+                probe(Ipv4Addr::LOCALHOST, Duration::from_secs(2))
+                    .await
+                    .alive
+            );
+        }
+    }
 }

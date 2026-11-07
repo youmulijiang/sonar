@@ -22,7 +22,7 @@ pub struct Cli {
     #[arg(value_name = "TARGETS")]
     pub targets: Vec<String>,
 
-    /// 探活方式，逗号分隔: icmp,ping,tcp,port
+    /// 探活方式，逗号分隔: arp,icmp,ping,tcp,port
     #[arg(short = 'm', long, default_value = "icmp,tcp")]
     pub methods: String,
 
@@ -71,7 +71,7 @@ impl Cli {
             .collect();
         if methods.is_empty() {
             anyhow::bail!(
-                "无效的探活方式: {}（可用: icmp,ping,tcp,port）",
+                "无效的探活方式: {}（可用: arp,icmp,ping,tcp,port）",
                 self.methods
             );
         }

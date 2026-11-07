@@ -18,10 +18,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::core::config::{ProbeMethod, ScanConfig};
 use crate::core::events::{HostResult, ScanEvent};
-use crate::core::probe::{format_ms, icmp, portscan, sysping, tcp, with_retries};
+use crate::core::probe::{arp, format_ms, icmp, portscan, sysping, tcp, with_retries};
 
 /// 独立探活的探针集合（每主机并发执行全部启用项）
 enum LivenessProbe {
+    Arp,
     Icmp,
     SysPing,
     Tcp(tcp::TcpProbe),
@@ -30,6 +31,7 @@ enum LivenessProbe {
 impl LivenessProbe {
     fn name(&self) -> &'static str {
         match self {
+            LivenessProbe::Arp => "ARP",
             LivenessProbe::Icmp => "ICMP",
             LivenessProbe::SysPing => "PING",
             LivenessProbe::Tcp(_) => "TCP",
@@ -82,6 +84,7 @@ async fn run_inner(
         .methods
         .iter()
         .filter_map(|m| match m {
+            ProbeMethod::Arp => Some(LivenessProbe::Arp),
             ProbeMethod::Icmp => Some(LivenessProbe::Icmp),
             ProbeMethod::SystemPing => Some(LivenessProbe::SysPing),
             ProbeMethod::Tcp => Some(LivenessProbe::Tcp(tcp::TcpProbe {
@@ -127,9 +130,12 @@ async fn run_inner(
 
     // ---------- 阶段二：端口扫描 ----------
     if cfg.methods.contains(&ProbeMethod::PortScan) && !cancel.is_cancelled() {
-        // 端口扫描开启时扫描全部目标：禁 ping 等在探活阶段未确认的主机，
-        // 也能通过开放端口 / RST 响应被判定存活（发现信号同 nmap -Pn 语义）
-        let scan_targets: Vec<Ipv4Addr> = hosts.clone();
+        // 端口仅用于补充探活，跳过已确认存活的目标。
+        let scan_targets: Vec<Ipv4Addr> = hosts
+            .iter()
+            .copied()
+            .filter(|ip| !results.get(ip).is_some_and(|r| r.alive))
+            .collect();
 
         if scan_targets.is_empty() {
             send(ScanEvent::Log("没有需要端口扫描的主机".into()));
@@ -229,17 +235,41 @@ async fn probe_host(
     retries: u32,
     cancel: &CancellationToken,
 ) -> HostResult {
-    let outs = join_all(probes.iter().map(|p| async move {
-        let outcome = match p {
-            LivenessProbe::Icmp => with_retries(cancel, retries, || icmp::probe(ip, timeout)).await,
-            LivenessProbe::SysPing => {
-                with_retries(cancel, retries, || sysping::probe(ip, timeout)).await
-            }
-            LivenessProbe::Tcp(t) => with_retries(cancel, retries, || t.probe(ip, timeout)).await,
-        };
-        (p.name(), outcome)
-    }))
-    .await;
+    let mut outs: Vec<(&str, crate::core::probe::ProbeOutcome)> = Vec::new();
+    for phase in 0..3 {
+        if outs.iter().any(|(_, o)| o.alive) {
+            break;
+        }
+        outs.extend(
+            join_all(
+                probes
+                    .iter()
+                    .filter(|p| match p {
+                        LivenessProbe::Arp => phase == 0,
+                        LivenessProbe::Tcp(_) => phase == 2,
+                        _ => phase == 1,
+                    })
+                    .map(|p| async move {
+                        let outcome = match p {
+                            LivenessProbe::Arp => {
+                                with_retries(cancel, retries, || arp::probe(ip, timeout)).await
+                            }
+                            LivenessProbe::Icmp => {
+                                with_retries(cancel, retries, || icmp::probe(ip, timeout)).await
+                            }
+                            LivenessProbe::SysPing => {
+                                with_retries(cancel, retries, || sysping::probe(ip, timeout)).await
+                            }
+                            LivenessProbe::Tcp(t) => {
+                                with_retries(cancel, retries, || t.probe(ip, timeout)).await
+                            }
+                        };
+                        (p.name(), outcome)
+                    }),
+            )
+            .await,
+        );
+    }
 
     let alive = outs.iter().any(|(_, o)| o.alive);
     let confirmed_by = outs
@@ -271,5 +301,35 @@ async fn probe_host(
         latency,
         open_ports: Vec::new(),
         detail,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn ping_alive_skips_tcp_and_port_scan() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let cfg = ScanConfig {
+            targets: vec!["127.0.0.1".into()],
+            methods: vec![
+                ProbeMethod::SystemPing,
+                ProbeMethod::Tcp,
+                ProbeMethod::PortScan,
+            ],
+            ..Default::default()
+        };
+        run_scan(cfg, CancellationToken::new(), tx).await;
+        let events: Vec<_> = rx.try_iter().collect();
+        assert!(
+            events.iter().any(
+                |e| matches!(e, ScanEvent::Host(r) if r.alive && r.confirmed_by == vec!["PING"])
+            )
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, ScanEvent::PortScanProgress { .. }))
+        );
     }
 }

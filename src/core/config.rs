@@ -3,6 +3,7 @@ use std::time::Duration;
 /// 探活方式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProbeMethod {
+    Arp,
     /// 原生 ICMP Echo（Windows 走 IcmpSendEcho，无需管理员；Unix 需 root/cap_net_raw）
     Icmp,
     /// 调用操作系统自带 ping 命令（兼容性最好，速度受进程创建限制）
@@ -16,6 +17,7 @@ pub enum ProbeMethod {
 impl ProbeMethod {
     pub fn name(self) -> &'static str {
         match self {
+            ProbeMethod::Arp => "ARP",
             ProbeMethod::Icmp => "ICMP",
             ProbeMethod::SystemPing => "PING",
             ProbeMethod::Tcp => "TCP",
@@ -25,6 +27,7 @@ impl ProbeMethod {
 
     pub fn from_str(s: &str) -> Option<ProbeMethod> {
         match s.to_ascii_lowercase().as_str() {
+            "arp" => Some(ProbeMethod::Arp),
             "icmp" => Some(ProbeMethod::Icmp),
             "ping" | "sysping" => Some(ProbeMethod::SystemPing),
             "tcp" => Some(ProbeMethod::Tcp),

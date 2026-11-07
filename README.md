@@ -22,7 +22,7 @@ ICMP · 系统 Ping · TCP Ping · 端口扫描 —— 多探针、高并发、�
 | **ICMP** | 原生 ICMP Echo。Windows 走 iphlpapi 的 `IcmpSendEcho`（免管理员）；Unix 走 raw socket | Windows 普通用户 / Unix 需 root 或 `cap_net_raw` |
 | **系统 Ping** | 调用操作系统自带 `ping` 命令 | 无 |
 | **TCP Ping** | 对常用服务端口发起 TCP 连接，连接成功**或收到 RST** 均判定存活 | 无 |
-| **端口扫描** | RustScan 风格 (主机, 端口) 全并发扫描，开启后扫描**全部目标**——禁 ping 等其他方式未确认的主机也能由开放端口 / RST 判定存活（默认关闭，可一键开启） | 无 |
+| **端口扫描** | RustScan 风格 (主机, 端口) 全并发扫描，开启后仅扫描**尚未确认存活的目标**——禁 ping 等其他方式未确认的主机也能由开放端口 / RST 判定存活（默认关闭，可一键开启） | 无 |
 
 - 🎯 **多探针高并发**：探活方式三选一 + 可选端口扫描；`buffer_unordered` 全速流水推进，慢主机不阻塞整体
 - 🧾 **目标灵活**：多行文本框每行一个目标，支持 IP / IP 段 / CIDR / 域名（`192.168.1.0/24`、`10.0.0.1-100`、`db.example.com`），可从文本文件导入（支持 `#` 注释）
@@ -146,3 +146,9 @@ CI（GitHub Actions，windows-latest）覆盖：`cargo fmt --check` → `clippy 
 ## 📄 License
 
 [MIT](LICENSE) © 2026
+
+### ARP 探活
+
+图形界面可选择 ARP，命令行使用 `-m arp` 或 `-m arp,icmp,tcp,port`。只执行选择的方式；组合时依次执行 ARP、ICMP/Ping、TCP、端口补充探活，确认存活后跳过后续方式。
+
+ARP 当前支持 Windows，使用系统 SendARP，仅探测直连 IPv4 目标，跨路由目标会跳过。系统可能使用邻居缓存，代理 ARP 也可能代答，因此 MAC 解析成功不等于目标应用服务可用。系统调用超时后可能仍在后台完成，并发限制为 32。

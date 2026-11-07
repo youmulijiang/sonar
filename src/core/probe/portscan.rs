@@ -93,11 +93,18 @@ pub async fn scan_hosts(
             break;
         }
         let chunk_len = chunk.len();
-        let outcomes = join_all(
-            chunk
-                .iter()
-                .map(|&(ip, port)| try_connect(ip, port, timeout)),
-        )
+        let outcomes = join_all(chunk.iter().map(|&(ip, port)| {
+            let alive = results
+                .get(&ip)
+                .is_some_and(PortScanResult::is_alive_signal);
+            async move {
+                if alive {
+                    super::tcp::PortState::Filtered
+                } else {
+                    try_connect(ip, port, timeout).await
+                }
+            }
+        }))
         .await;
         for ((ip, port), state) in chunk.into_iter().zip(outcomes) {
             let entry = results.entry(ip).or_default();

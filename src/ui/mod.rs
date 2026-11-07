@@ -63,7 +63,7 @@ pub fn run() {
 }
 
 /// 探活方式（互斥单选）
-const LIVENESS_NAMES: [&str; 3] = ["ICMP", "系统 Ping", "TCP"];
+const LIVENESS_NAMES: [&str; 4] = ["ICMP", "系统 Ping", "TCP", "ARP"];
 
 pub struct SonarApp {
     // ---- 目标 ----
@@ -265,6 +265,7 @@ impl SonarApp {
         let liveness = match self.liveness {
             0 => ProbeMethod::Icmp,
             1 => ProbeMethod::SystemPing,
+            3 => ProbeMethod::Arp,
             _ => ProbeMethod::Tcp,
         };
         let mut methods = vec![liveness];
@@ -767,6 +768,19 @@ impl Render for SonarApp {
                                                                 cx.notify();
                                                             },
                                                         )),
+                                                )
+                                                .child(
+                                                    Button::new("probe-arp")
+                                                        .outline()
+                                                        .icon(IconName::Network)
+                                                        .label(LIVENESS_NAMES[3])
+                                                        .selected(self.liveness == 3)
+                                                        .on_click(cx.listener(
+                                                            |this, _: &ClickEvent, _, cx| {
+                                                                this.liveness = 3;
+                                                                cx.notify();
+                                                            },
+                                                        )),
                                                 ),
                                         )
                                         // 参数
@@ -800,6 +814,7 @@ impl Render for SonarApp {
                                                 .text_color(cx.theme().muted_foreground)
                                                 .child(match self.liveness {
                                                     0 => "ICMP：原生 Echo 探测，Windows 下无需管理员权限",
+                                                    3 => "ARP：仅探测本地链路 IPv4（Windows），跨网段跳过",
                                                     1 => "系统 Ping：调用操作系统 ping 命令，兼容性最好",
                                                     _ => "TCP Ping：对常用端口发起 TCP 连接，连接成功或收到 RST 均判定存活",
                                                 })
